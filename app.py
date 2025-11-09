@@ -2,24 +2,31 @@ import streamlit as st
 import numpy as np
 import soundfile as sf
 import io
-from scipy.io import wavfile
 from dtw import dtw
+from pydub import AudioSegment
 
 st.set_page_config(page_title="音声マッチ＆トリミングツール", layout="centered")
 
-st.title("🎵 音声マッチ＆トリミングツール（軽量版）")
-st.caption("音源Aと録音Bを比較して、類似する部分を検出し、30秒ずつトリミングします。")
+st.title("🎵 音声マッチ＆トリミングツール（軽量版・MP3/FLAC対応）")
+st.caption("音源Aと録音Bを比較し、類似する部分を検出して30秒ずつトリミングします。")
 
 # --- アップロード ---
-file_a = st.file_uploader("音源Aをアップロード", type=["wav"])
-file_b = st.file_uploader("録音Bをアップロード", type=["wav"])
+file_a = st.file_uploader("音源Aをアップロード", type=["wav","mp3","flac"])
+file_b = st.file_uploader("録音Bをアップロード", type=["wav","mp3","flac"])
 trim_sec = st.number_input("トリミング時間（秒）", min_value=5, max_value=120, value=30)
 
-def normalize_audio(y):
-    return y / np.max(np.abs(y)) if np.max(np.abs(y)) > 0 else y
+# --- 音声読み込み関数 ---
+def load_audio(file) -> tuple[np.ndarray,int]:
+    """pydubで任意形式の音声を読み込み numpy 配列に変換"""
+    audio = AudioSegment.from_file(file)
+    y = np.array(audio.get_array_of_samples()).astype(np.float32)
+    if audio.channels > 1:
+        y = y.reshape((-1, audio.channels)).mean(axis=1)  # モノラル化
+    sr = audio.frame_rate
+    return y / np.max(np.abs(y)), sr
 
 def extract_feature(y, frame_size=2048, hop=512):
-    """波形のエネルギーを特徴量として抽出"""
+    """波形エネルギーを特徴量として抽出"""
     feature = []
     for i in range(0, len(y) - frame_size, hop):
         frame = y[i:i+frame_size]
@@ -28,11 +35,9 @@ def extract_feature(y, frame_size=2048, hop=512):
     return np.array(feature)
 
 def find_and_trim(y_a, sr_a, y_b, sr_b, trim_sec):
-    # 特徴量抽出
-    feat_a = extract_feature(normalize_audio(y_a))
-    feat_b = extract_feature(normalize_audio(y_b))
+    feat_a = extract_feature(y_a)
+    feat_b = extract_feature(y_b)
 
-    # DTWで最小距離区間を検出
     _, _, _, path = dtw(feat_a.reshape(-1,1), feat_b.reshape(-1,1), dist=lambda x,y: np.abs(x-y))
     idx_a, idx_b = np.array(path[0]), np.array(path[1])
     start_a = int(np.percentile(idx_a, 10))
@@ -56,16 +61,14 @@ def find_and_trim(y_a, sr_a, y_b, sr_b, trim_sec):
 
     return buf_a, buf_b
 
+# --- ボタン処理 ---
 if st.button("マッチしてトリミング実行"):
     if not file_a or not file_b:
         st.error("⚠️ 両方の音声ファイルをアップロードしてください。")
     else:
         with st.spinner("処理中...少しお待ちください"):
-            sr_a, y_a = wavfile.read(file_a)
-            sr_b, y_b = wavfile.read(file_b)
-
-            y_a = normalize_audio(y_a.astype(np.float32))
-            y_b = normalize_audio(y_b.astype(np.float32))
+            y_a, sr_a = load_audio(file_a)
+            y_b, sr_b = load_audio(file_b)
 
             buf_a, buf_b = find_and_trim(y_a, sr_a, y_b, sr_b, trim_sec)
 
