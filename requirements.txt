@@ -1,0 +1,6 @@
+streamlit==1.39.0
+librosa==0.10.2
+numpy==1.26.4
+soundfile==0.12.1
+dtw-python==1.5.3
+scipy==1.13.1
